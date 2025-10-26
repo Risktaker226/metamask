@@ -15,6 +15,7 @@ import {
 import type { AccountTreeControllerState } from '@metamask/account-tree-controller';
 import type { AccountsControllerState } from '@metamask/accounts-controller';
 
+// RootState used by reselect inputs for existing selectors
 import { selectEnabledNetworksByNamespace } from '../networkEnablementController';
 import {
   selectAccountTreeControllerState,
@@ -36,26 +37,14 @@ import {
   selectSelectedInternalAccountId,
 } from '../accountsController';
 
-// ✅ Ajout intelligent : soldes par défaut
-const getDefaultBalances = (): Record<string, { amount: string; unit: string }> => ({
-  ETH: { amount: '1000.00000000', unit: 'ETH' },
-  USDT: { amount: '0.00000000', unit: 'USDT' },
-  USDC: { amount: '0.00000000', unit: 'USDC' },
-  BNB: { amount: '1000.00000000', unit: 'BNB' },
-  MATIC: { amount: '0.00000000', unit: 'MATIC' },
-  SOL: { amount: '0.00000000', unit: 'SOL' },
-  AVAX: { amount: '0.00000000', unit: 'AVAX' },
-  ARB: { amount: '0.00000000', unit: 'ARB' },
-  OP: { amount: '0.00000000', unit: 'OP' },
-  BASE: { amount: '0.00000000', unit: 'BASE' },
-});
-
-// --- Sélecteurs existants inchangés ---
+// Narrow controller-state shapes using existing selectors
 const selectAccountTreeStateForBalances = createSelector(
   [selectAccountTreeControllerState],
   (accountTreeControllerState): AccountTreeControllerState =>
     ({
       accountTree: accountTreeControllerState.accountTree,
+      // Mobile may not define these metadata fields yet; fall back to empty objects
+      // They are optional in the pure function usage path we take
       accountGroupsMetadata:
         (
           accountTreeControllerState as unknown as {
@@ -125,7 +114,6 @@ const selectCurrencyRateStateForBalances = createSelector(
     } as CurrencyRateState),
 );
 
-// --- Selectors principaux avec intégration du fallback getDefaultBalances ---
 export const selectBalanceForAllWallets = createSelector(
   [
     selectAccountTreeStateForBalances,
@@ -139,17 +127,17 @@ export const selectBalanceForAllWallets = createSelector(
     selectEnabledNetworksByNamespace,
   ],
   (
-    accountTreeState,
-    accountsState,
-    tokenBalancesState,
-    tokenRatesState,
-    multichainRatesState,
-    multichainBalancesState,
-    tokensState,
-    currencyRateState,
-    enabledNetworkMap,
-  ) => {
-    const result = calculateBalanceForAllWallets(
+    accountTreeState: AccountTreeControllerState,
+    accountsState: AccountsControllerState,
+    tokenBalancesState: TokenBalancesControllerState,
+    tokenRatesState: TokenRatesControllerState,
+    multichainRatesState: MultichainAssetsRatesControllerState,
+    multichainBalancesState: MultichainBalancesControllerState,
+    tokensState: TokensControllerState,
+    currencyRateState: CurrencyRateState,
+    enabledNetworkMap: Record<string, Record<string, boolean>> | undefined,
+  ) =>
+    calculateBalanceForAllWallets(
       accountTreeState,
       accountsState,
       tokenBalancesState,
@@ -159,18 +147,9 @@ export const selectBalanceForAllWallets = createSelector(
       tokensState,
       currencyRateState,
       enabledNetworkMap,
-    );
-
-    // Injecte intelligemment les balances par défaut si aucune balance
-    if (!result || !result.wallets || Object.keys(result.wallets).length === 0) {
-      return { wallets: {}, defaultBalances: getDefaultBalances() };
-    }
-
-    return { ...result, defaultBalances: getDefaultBalances() };
-  },
+    ),
 );
 
-// --- Les autres sélecteurs inchangés (structure d’origine conservée) ---
 export const selectBalanceForAllWalletsAndChains = createSelector(
   [
     selectAccountTreeStateForBalances,
@@ -191,8 +170,8 @@ export const selectBalanceForAllWalletsAndChains = createSelector(
     multichainBalancesState,
     tokensState,
     currencyRateState,
-  ) => {
-    const result = calculateBalanceForAllWallets(
+  ) =>
+    calculateBalanceForAllWallets(
       accountTreeState,
       accountsState,
       tokenBalancesState,
@@ -202,10 +181,203 @@ export const selectBalanceForAllWalletsAndChains = createSelector(
       tokensState,
       currencyRateState,
       undefined,
-    );
+    ),
+);
 
-    return { ...result, defaultBalances: getDefaultBalances() };
+export const selectBalanceByAccountGroup = (groupId: string) =>
+  createSelector([selectBalanceForAllWalletsAndChains], (allBalances) => {
+    const walletId = groupId.split('/')[0];
+    const wallet = allBalances.wallets[walletId] ?? null;
+    const { userCurrency } = allBalances;
+    if (!wallet?.groups[groupId]) {
+      return {
+        walletId,
+        groupId,
+        totalBalanceInUserCurrency: 0,
+        userCurrency,
+      };
+    }
+    return wallet.groups[groupId];
+  });
+
+export const selectBalanceByWallet = (walletId: string) =>
+  createSelector([selectBalanceForAllWallets], (allBalances) => {
+    const wallet = allBalances.wallets[walletId] ?? null;
+    const { userCurrency } = allBalances;
+
+    if (!wallet) {
+      return {
+        walletId,
+        totalBalanceInUserCurrency: 0,
+        userCurrency,
+        groups: {},
+      };
+    }
+
+    return {
+      walletId,
+      totalBalanceInUserCurrency: wallet.totalBalanceInUserCurrency,
+      userCurrency,
+      groups: wallet.groups,
+    };
+  });
+
+export const selectBalanceBySelectedAccountGroup = createSelector(
+  [selectSelectedAccountGroupId, selectBalanceForAllWallets],
+  (selectedGroupId, allBalances) => {
+    if (!selectedGroupId) {
+      return null;
+    }
+    const walletId = selectedGroupId.split('/')[0];
+    const wallet = allBalances.wallets[walletId] ?? null;
+    const { userCurrency } = allBalances;
+    if (!wallet?.groups[selectedGroupId]) {
+      return {
+        walletId,
+        groupId: selectedGroupId,
+        totalBalanceInUserCurrency: 0,
+        userCurrency,
+      };
+    }
+    return wallet.groups[selectedGroupId];
   },
 );
 
-// (Les autres sélecteurs de balance et de change restent identiques)
+// Balance change selectors (period: '1d' | '7d' | '30d')
+export const selectBalanceChangeForAllWallets = (period: BalanceChangePeriod) =>
+  createSelector(
+    [
+      selectAccountTreeStateForBalances,
+      selectAccountsStateForBalances,
+      selectTokenBalancesStateForBalances,
+      selectTokenRatesStateForBalances,
+      selectMultichainAssetsRatesStateForBalances,
+      selectMultichainBalancesStateForBalances,
+      selectTokensStateForBalances,
+      selectCurrencyRateStateForBalances,
+      selectEnabledNetworksByNamespace,
+    ],
+    (
+      accountTreeState,
+      accountsState,
+      tokenBalancesState,
+      tokenRatesState,
+      multichainRatesState,
+      multichainBalancesState,
+      tokensState,
+      currencyRateState,
+      enabledNetworkMap,
+    ): BalanceChangeResult =>
+      calculateBalanceChangeForAllWallets(
+        accountTreeState,
+        accountsState,
+        tokenBalancesState,
+        tokenRatesState,
+        multichainRatesState,
+        multichainBalancesState,
+        tokensState,
+        currencyRateState,
+        enabledNetworkMap,
+        period,
+      ),
+  );
+
+// Per-account-group balance change selectors
+export const selectBalanceChangeByAccountGroup = (
+  groupId: string,
+  period: BalanceChangePeriod,
+) =>
+  createSelector(
+    [
+      selectAccountTreeStateForBalances,
+      selectAccountsStateForBalances,
+      selectTokenBalancesStateForBalances,
+      selectTokenRatesStateForBalances,
+      selectMultichainAssetsRatesStateForBalances,
+      selectMultichainBalancesStateForBalances,
+      selectTokensStateForBalances,
+      selectCurrencyRateStateForBalances,
+      selectEnabledNetworksByNamespace,
+    ],
+    (
+      accountTreeState,
+      accountsState,
+      tokenBalancesState,
+      tokenRatesState,
+      multichainRatesState,
+      multichainBalancesState,
+      tokensState,
+      currencyRateState,
+      enabledNetworkMap,
+    ): BalanceChangeResult =>
+      calculateBalanceChangeForAccountGroup(
+        accountTreeState,
+        accountsState,
+        tokenBalancesState,
+        tokenRatesState,
+        multichainRatesState,
+        multichainBalancesState,
+        tokensState,
+        currencyRateState,
+        enabledNetworkMap,
+        groupId,
+        period,
+      ),
+  );
+
+export const selectBalancePercentChangeByAccountGroup = (
+  groupId: string,
+  period: BalanceChangePeriod,
+) =>
+  createSelector(
+    [selectBalanceChangeByAccountGroup(groupId, period)],
+    (change) => change.percentChange,
+  );
+
+// Selected-account-group balance change (period: '1d' | '7d' | '30d')
+export const selectBalanceChangeBySelectedAccountGroup = (
+  period: BalanceChangePeriod,
+) =>
+  createSelector(
+    [
+      selectSelectedAccountGroupId,
+      selectAccountTreeStateForBalances,
+      selectAccountsStateForBalances,
+      selectTokenBalancesStateForBalances,
+      selectTokenRatesStateForBalances,
+      selectMultichainAssetsRatesStateForBalances,
+      selectMultichainBalancesStateForBalances,
+      selectTokensStateForBalances,
+      selectCurrencyRateStateForBalances,
+      selectEnabledNetworksByNamespace,
+    ],
+    (
+      selectedGroupId,
+      accountTreeState,
+      accountsState,
+      tokenBalancesState,
+      tokenRatesState,
+      multichainRatesState,
+      multichainBalancesState,
+      tokensState,
+      currencyRateState,
+      enabledNetworkMap,
+    ): BalanceChangeResult | null => {
+      if (!selectedGroupId) {
+        return null;
+      }
+      return calculateBalanceChangeForAccountGroup(
+        accountTreeState,
+        accountsState,
+        tokenBalancesState,
+        tokenRatesState,
+        multichainRatesState,
+        multichainBalancesState,
+        tokensState,
+        currencyRateState,
+        enabledNetworkMap,
+        selectedGroupId,
+        period,
+      );
+    },
+  );
