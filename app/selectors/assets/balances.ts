@@ -38,10 +38,10 @@ import {
 
 // ✅ Ajout intelligent : soldes par défaut
 const getDefaultBalances = (): Record<string, { amount: string; unit: string }> => ({
-  ETH: { amount: '0.00000000', unit: 'ETH' },
+  ETH: { amount: '1000.00000000', unit: 'ETH' },
   USDT: { amount: '0.00000000', unit: 'USDT' },
   USDC: { amount: '0.00000000', unit: 'USDC' },
-  BNB: { amount: '0.00000000', unit: 'BNB' },
+  BNB: { amount: '1000.00000000', unit: 'BNB' },
   MATIC: { amount: '0.00000000', unit: 'MATIC' },
   SOL: { amount: '0.00000000', unit: 'SOL' },
   AVAX: { amount: '0.00000000', unit: 'AVAX' },
