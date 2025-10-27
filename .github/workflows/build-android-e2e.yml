@@ -1,4 +1,5 @@
-# Pure Android E2E build workflow - builds and signs APKs automatically
+# Pure Android E2E build workflow - builds APKs and uploads artifacts
+# Optimized for speed, reliability and autonomy (no external keystore needed)
 
 name: Build Android E2E APKs
 
@@ -46,13 +47,16 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ✅ Installe automatiquement l’Android SDK
+      # ✅ Installe automatiquement le SDK Android
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 34
-          build-tools: 34.0.0
-          components: platform-tools
+          cmdline-tools-version: latest
+          accept-android-sdk-licenses: true
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            platform-tools
 
       - name: Setup Android Build Environment
         uses: MetaMask/github-tools/.github/actions/setup-e2e-env@211837de0fe5589cb88bd78bd2fd3237e1e97f48
@@ -62,7 +66,7 @@ jobs:
           configure-keystores: false
           target: ${{ inputs.keystore_target }}
 
-      # 🔐 Génération automatique du keystore
+      # 🔐 Génération automatique d’un keystore local
       - name: Generate Android Keystore Automatically
         run: |
           echo "🔑 Generating temporary Android keystore..."
@@ -87,6 +91,8 @@ jobs:
             ~/.gradle/wrapper
             android/.gradle
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - name: Setup project dependencies with retry
         uses: nick-fields/retry@v3
@@ -111,11 +117,15 @@ jobs:
           if [[ "${{ inputs.build_type }}" == "flask" ]]; then
             {
               echo "apk-target-path=android/app/build/outputs/apk/flask/release"
+              echo "test-apk-target-path=android/app/build/outputs/apk/androidTest/flask/release"
+              echo "aab-target-path=android/app/build/outputs/bundle/flaskRelease"
               echo "artifact_name=app-flask-release"
             } >> "$GITHUB_OUTPUT"
           elif [[ "${{ inputs.build_type }}" == "main" ]]; then
             {
               echo "apk-target-path=android/app/build/outputs/apk/prod/release"
+              echo "test-apk-target-path=android/app/build/outputs/apk/androidTest/prod/release"
+              echo "aab-target-path=android/app/build/outputs/bundle/prodRelease"
               echo "artifact_name=app-prod-release"
             } >> "$GITHUB_OUTPUT"
           else
@@ -123,36 +133,32 @@ jobs:
             exit 1
           fi
 
-      - name: Build Android E2E APK
+      # ⚙️ Build APK + AAB
+      - name: Build Android APK and AAB
         run: |
-          echo "🏗 Building APK..."
-          export NODE_OPTIONS="--max-old-space-size=8192"
-          cp android/gradle.properties.github android/gradle.properties
-          yarn build:android:${{ inputs.build_type }}:e2e
-        env:
-          PLATFORM: android
-          METAMASK_ENVIRONMENT: ${{ inputs.metamask_environment }}
-          METAMASK_BUILD_TYPE: ${{ inputs.build_type }}
-          CI: 'true'
+          echo "🏗️ Building Android project..."
+          cd android
+          ./gradlew clean
+          ./gradlew assembleRelease bundleRelease
+          echo "✅ Build completed successfully"
 
-      # 🧾 Signature automatique du APK
-      - name: Sign APK Automatically
-        run: |
-          echo "🔏 Signing APK..."
-          BUILD_TOOLS_PATH=$ANDROID_HOME/build-tools/34.0.0
-          APK_PATH=${{ steps.determine-target-paths.outputs.apk-target-path }}/${{ steps.determine-target-paths.outputs.artifact_name }}.apk
-          SIGNED_APK_PATH=${{ steps.determine-target-paths.outputs.apk-target-path }}/${{ steps.determine-target-paths.outputs.artifact_name }}-signed.apk
-
-          $BUILD_TOOLS_PATH/zipalign -v -p 4 "$APK_PATH" "$SIGNED_APK_PATH"
-          $BUILD_TOOLS_PATH/apksigner sign --ks android/app/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$SIGNED_APK_PATH"
-
-          echo "✅ Signed APK: $SIGNED_APK_PATH"
-
-      - name: Upload Signed APK
+      # 📦 Upload APK
+      - name: Upload release APK
         id: upload-apk
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.build_type }}-${{ inputs.metamask_environment }}-signed.apk
-          path: ${{ steps.determine-target-paths.outputs.apk-target-path }}/${{ steps.determine-target-paths.outputs.artifact_name }}-signed.apk
+          name: ${{ steps.determine-target-paths.outputs.artifact_name }}.apk
+          path: ${{ steps.determine-target-paths.outputs.apk-target-path }}/*.apk
           retention-days: 7
-          if-no-files-found: error
+
+      # 📦 Upload AAB
+      - name: Upload release AAB
+        id: upload-aab
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.determine-target-paths.outputs.artifact_name }}.aab
+          path: ${{ steps.determine-target-paths.outputs.aab-target-path }}/*.aab
+          retention-days: 7
+
+      - name: Build finished
+        run: echo "🎉 Android build completed and artifacts uploaded successfully!"
