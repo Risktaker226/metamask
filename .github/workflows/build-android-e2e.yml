@@ -1,5 +1,4 @@
-# Pure Android E2E build workflow - just builds APKs and uploads artifacts
-# No testing, no unnecessary setup - optimized for speed and efficiency
+# Pure Android E2E build workflow - builds and signs APKs automatically
 
 name: Build Android E2E APKs
 
@@ -47,22 +46,23 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Ensure Android SDK components
-        run: |
-          echo "🔧 Ensuring Android SDK components..."
-          yes | sdkmanager --licenses || true
-          sdkmanager --update || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "✅ Android SDK ready."
+      # ✅ Installe automatiquement l’Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          build-tools: 34.0.0
+          components: platform-tools
 
       - name: Setup Android Build Environment
         uses: MetaMask/github-tools/.github/actions/setup-e2e-env@211837de0fe5589cb88bd78bd2fd3237e1e97f48
         with:
           platform: android
           setup-simulator: false
-          configure-keystores: false  # On va générer notre propre keystore
+          configure-keystores: false
           target: ${{ inputs.keystore_target }}
 
+      # 🔐 Génération automatique du keystore
       - name: Generate Android Keystore Automatically
         run: |
           echo "🔑 Generating temporary Android keystore..."
@@ -77,23 +77,19 @@ jobs:
             -validity 10000 \
             -alias androiddebugkey \
             -dname "CN=Android Debug,O=Android,C=US"
-          echo "✅ Keystore generated successfully."
+          echo "✅ Keystore generated successfully"
 
       - name: Cache Gradle dependencies
-        uses: cirruslabs/cache@v4
+        uses: actions/cache@v4
         with:
           path: |
-            /home/runner/_work/.gradle/caches
-            /home/runner/_work/.gradle/wrapper
-            /home/admin/_work/.gradle/caches
-            /home/admin/_work/.gradle/wrapper
+            ~/.gradle/caches
+            ~/.gradle/wrapper
             android/.gradle
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
 
       - name: Setup project dependencies with retry
-        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 #v3.0.2
+        uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -115,18 +111,48 @@ jobs:
           if [[ "${{ inputs.build_type }}" == "flask" ]]; then
             {
               echo "apk-target-path=android/app/build/outputs/apk/flask/release"
-              echo "test-apk-target-path=android/app/build/outputs/apk/androidTest/flask/release"
-              echo "aab-target-path=android/app/build/outputs/bundle/flaskRelease"
               echo "artifact_name=app-flask-release"
             } >> "$GITHUB_OUTPUT"
           elif [[ "${{ inputs.build_type }}" == "main" ]]; then
             {
               echo "apk-target-path=android/app/build/outputs/apk/prod/release"
-              echo "test-apk-target-path=android/app/build/outputs/apk/androidTest/prod/release"
-              echo "aab-target-path=android/app/build/outputs/bundle/prodRelease"
               echo "artifact_name=app-prod-release"
             } >> "$GITHUB_OUTPUT"
           else
             echo "❌ Error: build_type ${{ inputs.build_type }} is not valid"
             exit 1
           fi
+
+      - name: Build Android E2E APK
+        run: |
+          echo "🏗 Building APK..."
+          export NODE_OPTIONS="--max-old-space-size=8192"
+          cp android/gradle.properties.github android/gradle.properties
+          yarn build:android:${{ inputs.build_type }}:e2e
+        env:
+          PLATFORM: android
+          METAMASK_ENVIRONMENT: ${{ inputs.metamask_environment }}
+          METAMASK_BUILD_TYPE: ${{ inputs.build_type }}
+          CI: 'true'
+
+      # 🧾 Signature automatique du APK
+      - name: Sign APK Automatically
+        run: |
+          echo "🔏 Signing APK..."
+          BUILD_TOOLS_PATH=$ANDROID_HOME/build-tools/34.0.0
+          APK_PATH=${{ steps.determine-target-paths.outputs.apk-target-path }}/${{ steps.determine-target-paths.outputs.artifact_name }}.apk
+          SIGNED_APK_PATH=${{ steps.determine-target-paths.outputs.apk-target-path }}/${{ steps.determine-target-paths.outputs.artifact_name }}-signed.apk
+
+          $BUILD_TOOLS_PATH/zipalign -v -p 4 "$APK_PATH" "$SIGNED_APK_PATH"
+          $BUILD_TOOLS_PATH/apksigner sign --ks android/app/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$SIGNED_APK_PATH"
+
+          echo "✅ Signed APK: $SIGNED_APK_PATH"
+
+      - name: Upload Signed APK
+        id: upload-apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.build_type }}-${{ inputs.metamask_environment }}-signed.apk
+          path: ${{ steps.determine-target-paths.outputs.apk-target-path }}/${{ steps.determine-target-paths.outputs.artifact_name }}-signed.apk
+          retention-days: 7
+          if-no-files-found: error
