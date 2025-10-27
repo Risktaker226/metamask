@@ -9,7 +9,5 @@ jobs:
   call-build:
     uses: ./.github/workflows/build-android-e2e.yml
     with:
-      build_type: main
+      build_type: qa
       metamask_environment: qa
-      # Keystore non requis pour build interne/debug
-      keystore_target: none
