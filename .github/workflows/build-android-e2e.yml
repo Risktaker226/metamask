@@ -47,13 +47,13 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-     - name: Ensure Android SDK components
-  run: |
-    echo "🔧 Ensuring Android SDK components..."
-    sdkmanager --licenses || true
-    sdkmanager --update || true
-    sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-    echo "✅ Android SDK ready.""
+      - name: Ensure Android SDK components
+        run: |
+          echo "🔧 Ensuring Android SDK components..."
+          yes | sdkmanager --licenses || true
+          sdkmanager --update || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          echo "✅ Android SDK ready."
 
       - name: Setup Android Build Environment
         uses: MetaMask/github-tools/.github/actions/setup-e2e-env@211837de0fe5589cb88bd78bd2fd3237e1e97f48
@@ -63,7 +63,6 @@ jobs:
           configure-keystores: false  # On va générer notre propre keystore
           target: ${{ inputs.keystore_target }}
 
-      # 🔐 Génération automatique d’un keystore local
       - name: Generate Android Keystore Automatically
         run: |
           echo "🔑 Generating temporary Android keystore..."
@@ -78,7 +77,7 @@ jobs:
             -validity 10000 \
             -alias androiddebugkey \
             -dname "CN=Android Debug,O=Android,C=US"
-          echo "✅ Keystore generated successfully"
+          echo "✅ Keystore generated successfully."
 
       - name: Cache Gradle dependencies
         uses: cirruslabs/cache@v4
@@ -131,6 +130,3 @@ jobs:
             echo "❌ Error: build_type ${{ inputs.build_type }} is not valid"
             exit 1
           fi
-
-      # (tout le reste reste identique)
-      # Build, cache, upload des APK/AAB, etc.
