@@ -13,7 +13,6 @@ on:
       aab-uploaded:
         description: 'Whether the AAB was successfully uploaded'
         value: ${{ jobs.build-android-apks.outputs.aab-uploaded }}
-        type: boolean
     inputs:
       build_type:
         description: 'The type of build to perform'
