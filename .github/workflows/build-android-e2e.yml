@@ -53,19 +53,26 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Ensure Android SDK components
+      - name: Install Android SDK tools
         run: |
-          echo "🔧 Ensuring Android SDK components..."
-          export ANDROID_SDK_ROOT=$HOME/android-sdk
-          mkdir -p "$ANDROID_SDK_ROOT"
+          echo "🧱 Installing Android SDK command-line tools..."
+          export ANDROID_SDK_ROOT=/opt/android-sdk
+          sudo mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+          sudo chmod -R 777 $ANDROID_SDK_ROOT
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          unzip -q -o cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest" || true
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+          unzip -q -o cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
+          mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
+          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
           yes | sdkmanager --licenses || true
           sdkmanager --update || true
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "✅ Android SDK ready."
+          echo "✅ Android SDK installed successfully at $ANDROID_SDK_ROOT"
+
+      - name: Verify SDK installation
+        run: |
+          echo "🔎 Checking SDK structure..."
+          ls -R /opt/android-sdk/cmdline-tools/latest/bin || true
+          which sdkmanager || true
         
 
       - name: Setup Android Build Environment
