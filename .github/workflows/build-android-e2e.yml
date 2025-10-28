@@ -47,8 +47,9 @@ jobs:
 
       - name: Generate local keystore automatically
         run: |
-          echo "🔑 Generating local keystore..."
+          echo "🔑 Generating temporary Android keystore..."
           mkdir -p android/app
+          rm -f android/app/debug.keystore || true
           keytool -genkeypair \
             -v \
             -keystore android/app/debug.keystore \
