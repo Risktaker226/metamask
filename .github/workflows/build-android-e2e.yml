@@ -53,9 +53,9 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install Android SDK tools
+      - name: Install Android SDK (no emulator)
         run: |
-          echo "🧱 Installing Android SDK command-line tools..."
+          echo "🧱 Installing minimal Android SDK..."
           export ANDROID_SDK_ROOT=/opt/android-sdk
           sudo mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
           sudo chmod -R 777 $ANDROID_SDK_ROOT
@@ -64,9 +64,15 @@ jobs:
           mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
           export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
           yes | sdkmanager --licenses || true
-          sdkmanager --update || true
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "✅ Android SDK installed successfully at $ANDROID_SDK_ROOT"
+          echo "✅ Android SDK ready at $ANDROID_SDK_ROOT"
+
+      - name: Configure environment
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "AVD_DISABLE=true" >> $GITHUB_ENV
+          echo "✅ Emulator disabled and environment configured"
 
       - name: Verify SDK installation
         run: |
