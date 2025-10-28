@@ -47,7 +47,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ✅ Fix stable SDK install
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
       - name: Ensure Android SDK components
         run: |
           echo "🔧 Ensuring Android SDK components..."
@@ -61,6 +66,7 @@ jobs:
           sdkmanager --update || true
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
           echo "✅ Android SDK ready."
+        
 
       - name: Setup Android Build Environment
         uses: MetaMask/github-tools/.github/actions/setup-e2e-env@211837de0fe5589cb88bd78bd2fd3237e1e97f48
