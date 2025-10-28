@@ -1,98 +1,53 @@
-# Pure Android E2E build workflow - just builds APKs and uploads artifacts
-# No testing, no unnecessary setup - optimized for speed and efficiency
-
 name: Build Android E2E APKs
 
 on:
   workflow_call:
-    outputs:
-      apk-uploaded:
-        description: 'Whether the APK was successfully uploaded'
-        value: ${{ jobs.build-android-apks.outputs.apk-uploaded }}
-      aab-uploaded:
-        description: 'Whether the AAB was successfully uploaded'
-        value: ${{ jobs.build-android-apks.outputs.aab-uploaded }}
     inputs:
       build_type:
-        description: 'The type of build to perform'
+        description: "The type of build to perform"
         required: false
-        default: 'main'
+        default: "main"
         type: string
       metamask_environment:
-        description: 'The environment to build for'
+        description: "The environment to build for"
         required: false
-        default: 'qa'
-        type: string
-      keystore_target:
-        description: 'The target to use for the keystore'
-        required: false
-        default: 'qa'
+        default: "qa"
         type: string
 
 jobs:
   build-android-apks:
-    name: Build Android E2E APKs
+    name: Build Android APK Only
     runs-on: ubuntu-22.04
-    env:
-      GRADLE_USER_HOME: /home/admin/_work/.gradle
-    outputs:
-      apk-uploaded: ${{ steps.upload-apk.outcome == 'success' }}
-      aab-uploaded: ${{ steps.upload-aab.outcome == 'success' }}
-      apk-target-path: ${{ steps.determine-target-paths.outputs.apk-target-path }}
-      test-apk-target-path: ${{ steps.determine-target-paths.outputs.test-apk-target-path }}
-      aab-target-path: ${{ steps.determine-target-paths.outputs.aab-target-path }}
-      artifact_name: ${{ steps.determine-target-paths.outputs.artifact_name }}
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Install Java 17 (required for Android SDK)
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          distribution: "temurin"
+          java-version: "17"
 
-      - name: Install Android SDK (no emulator)
+      - name: Install Android SDK tools
         run: |
-          echo "🧱 Installing minimal Android SDK..."
-          export ANDROID_SDK_ROOT=/opt/android-sdk
-          sudo mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          sudo chmod -R 777 $ANDROID_SDK_ROOT
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          unzip -q -o cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
-          mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
-          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
+          echo "⚙️ Installing Android SDK tools..."
+          mkdir -p /usr/local/lib/android/sdk/cmdline-tools
+          cd /usr/local/lib/android/sdk/cmdline-tools
+          wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip
+          mv cmdline-tools latest || true
+          rm cmdline-tools.zip
+          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
           yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "✅ Android SDK ready at $ANDROID_SDK_ROOT"
+          sdkmanager --update || true
+          sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+          echo "✅ Android SDK installed successfully"
 
-      - name: Configure environment
+      - name: Generate local keystore automatically
         run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "AVD_DISABLE=true" >> $GITHUB_ENV
-          echo "✅ Emulator disabled and environment configured"
-
-      - name: Verify SDK installation
-        run: |
-          echo "🔎 Checking SDK structure..."
-          ls -R /opt/android-sdk/cmdline-tools/latest/bin || true
-          which sdkmanager || true
-        
-
-      - name: Setup Android Build Environment
-        uses: MetaMask/github-tools/.github/actions/setup-e2e-env@211837de0fe5589cb88bd78bd2fd3237e1e97f48
-        with:
-          platform: android
-          setup-simulator: false
-          configure-keystores: false  # On génère notre propre keystore
-          target: ${{ inputs.keystore_target }}
-
-      # 🔐 Génération automatique du keystore local
-      - name: Generate Android Keystore Automatically
-        run: |
-          echo "🔑 Generating temporary Android keystore..."
+          echo "🔑 Generating local keystore..."
           mkdir -p android/app
           keytool -genkeypair \
             -v \
@@ -104,84 +59,30 @@ jobs:
             -validity 10000 \
             -alias androiddebugkey \
             -dname "CN=Android Debug,O=Android,C=US"
-          echo "✅ Keystore generated successfully."
+          echo "✅ Keystore generated successfully"
 
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
         with:
           path: |
-            /home/runner/_work/.gradle/caches
-            /home/runner/_work/.gradle/wrapper
-            /home/admin/_work/.gradle/caches
-            /home/admin/_work/.gradle/wrapper
-            android/.gradle
+            ~/.gradle/caches
+            ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
 
-      - name: Setup project dependencies with retry
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          retry_wait_seconds: 30
-          command: |
-            echo "🚀 Setting up project..."
-            yarn setup:github-ci --no-build-ios
-
-      - name: Generate current fingerprint
-        id: generate-fingerprint
+      - name: Install project dependencies
         run: |
-          FINGERPRINT=$(yarn fingerprint:generate)
-          echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
-          echo "Current fingerprint: ${FINGERPRINT}"
+          echo "📦 Installing dependencies..."
+          yarn install --frozen-lockfile
 
-      - name: Determine target paths and Artifact Names
-        id: determine-target-paths
+      - name: Build Android APK
         run: |
-          if [[ "${{ inputs.build_type }}" == "flask" ]]; then
-            {
-              echo "apk-target-path=android/app/build/outputs/apk/flask/release"
-              echo "test-apk-target-path=android/app/build/outputs/apk/androidTest/flask/release"
-              echo "aab-target-path=android/app/build/outputs/bundle/flaskRelease"
-              echo "artifact_name=app-flask-release"
-            } >> "$GITHUB_OUTPUT"
-          elif [[ "${{ inputs.build_type }}" == "main" ]]; then
-            {
-              echo "apk-target-path=android/app/build/outputs/apk/prod/release"
-              echo "test-apk-target-path=android/app/build/outputs/apk/androidTest/prod/release"
-              echo "aab-target-path=android/app/build/outputs/bundle/prodRelease"
-              echo "artifact_name=app-prod-release"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo "❌ Error: build_type ${{ inputs.build_type }} is not valid"
-            exit 1
-          fi
-
-      # 🧱 Build Android APK + AAB
-      - name: Build Android APK and AAB
-        run: |
-          echo "🏗️ Building Android APK and AAB..."
+          echo "🏗️ Building Android APK..."
           cd android
-          ./gradlew clean
-          ./gradlew assembleRelease bundleRelease
-          echo "✅ Build finished."
+          ./gradlew assembleRelease
+          echo "✅ APK build completed."
 
-      # 📦 Upload APK
-      - name: Upload release APK
-        id: upload-apk
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
-          path: android/app/build/outputs/apk/prod/release/*.apk
-
-      # 📦 Upload AAB
-      - name: Upload release AAB
-        id: upload-aab
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-aab
-          path: android/app/build/outputs/bundle/prodRelease/*.aab
-
-      - name: ✅ Build Completed
-        run: echo "🎉 Android build finished successfully!"
+          name: android-apk
+          path: android/app/build/outputs/apk/release/*.apk
