@@ -20,32 +20,36 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout repository
+      - name: 🧭 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Java 17 (required for Android SDK)
+      - name: ☕ Install Java 17 (required for Android SDK)
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Install Android SDK tools
+      - name: ⚙️ Install Android SDK Commandline Tools
         run: |
           echo "⚙️ Installing Android SDK tools..."
-          mkdir -p /usr/local/lib/android/sdk/cmdline-tools
-          cd /usr/local/lib/android/sdk/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip
-          mv cmdline-tools latest || true
-          rm cmdline-tools.zip
           export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          cd "$ANDROID_SDK_ROOT/cmdline-tools"
+          
+          # Téléchargement du package officiel
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O sdk-tools.zip
+          unzip -q sdk-tools.zip -d tools
+          mv tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          rm sdk-tools.zip
+
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
+          
           yes | sdkmanager --licenses || true
           sdkmanager --update || true
           sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
           echo "✅ Android SDK installed successfully"
 
-      - name: Generate local keystore automatically
+      - name: 🔑 Generate local keystore automatically
         run: |
           echo "🔑 Generating temporary Android keystore..."
           mkdir -p android/app
@@ -62,7 +66,7 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
           echo "✅ Keystore generated successfully"
 
-      - name: Cache Gradle dependencies
+      - name: 📦 Cache Gradle dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -70,19 +74,25 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
-      - name: Install project dependencies
+      - name: 📦 Install project dependencies
         run: |
-          echo "📦 Installing dependencies..."
+          echo "📦 Installing JS dependencies..."
           yarn install --frozen-lockfile
 
-      - name: Build Android APK
+      - name: 🧩 Patch deprecated compile() calls
+        run: |
+          echo "🧩 Patching deprecated Gradle compile() calls..."
+          find node_modules/react-native-aes-crypto-forked/android -name "build.gradle" -type f -exec sed -i 's/compile /implementation /g' {} +
+          echo "✅ Gradle dependencies patched."
+
+      - name: 🏗️ Build Android release APK
         run: |
           echo "🏗️ Building Android APK..."
           cd android
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon
           echo "✅ APK build completed."
 
-      - name: Upload APK artifact
+      - name: 📤 Upload built APK
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
