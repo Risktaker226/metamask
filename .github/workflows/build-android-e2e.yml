@@ -1,4 +1,4 @@
-name: Build Android E2E APKs
+name: Build Android E2E APKs (Extreme)
 
 on:
   workflow_call:
@@ -9,21 +9,21 @@ on:
         default: "main"
         type: string
       metamask_environment:
-        description: "The environment to build for"
+        description: "The environment to build for (qa/live)"
         required: false
         default: "qa"
         type: string
 
 jobs:
   build-android-apks:
-    name: Build Android APK Only
+    name: Extreme Android APK Build
     runs-on: ubuntu-22.04
 
     steps:
       - name: 🧭 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ☕ Install Java 17 (required for Android SDK)
+      - name: ☕ Install Java 17
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
@@ -31,69 +31,76 @@ jobs:
 
       - name: ⚙️ Install Android SDK Commandline Tools
         run: |
-          echo "⚙️ Installing Android SDK tools..."
           export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           cd "$ANDROID_SDK_ROOT/cmdline-tools"
-          
-          # Téléchargement du package officiel
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O sdk-tools.zip
           unzip -q sdk-tools.zip -d tools
           mv tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           rm sdk-tools.zip
-
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
-          
           yes | sdkmanager --licenses || true
           sdkmanager --update || true
           sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
-          echo "✅ Android SDK installed successfully"
 
-      - name: 🔑 Generate local keystore automatically
+      - name: 🔑 Generate local keystore
         run: |
-          echo "🔑 Generating temporary Android keystore..."
           mkdir -p android/app
           rm -f android/app/debug.keystore || true
-          keytool -genkeypair \
-            -v \
+          keytool -genkeypair -v \
             -keystore android/app/debug.keystore \
-            -storepass android \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
+            -storepass android -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
             -alias androiddebugkey \
             -dname "CN=Android Debug,O=Android,C=US"
-          echo "✅ Keystore generated successfully"
 
-      - name: 📦 Cache Gradle dependencies
+      - name: 📦 Cache Gradle & Node Modules
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+            node_modules
+          key: gradle-node-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/yarn.lock') }}
 
-      - name: 📦 Install project dependencies
-        run: |
-          echo "📦 Installing JS dependencies..."
-          yarn install --frozen-lockfile
+      - name: 📦 Install JS dependencies
+        run: yarn install --frozen-lockfile
 
-      - name: 🧩 Patch deprecated compile() calls
+      - name: 🛠️ Extreme Pre-build fixes
         run: |
-          echo "🧩 Patching deprecated Gradle compile() calls..."
-          find node_modules/react-native-aes-crypto-forked/android -name "build.gradle" -type f -exec sed -i 's/compile /implementation /g' {} +
-          echo "✅ Gradle dependencies patched."
+          echo "🛠️ Patching deprecated compile() calls in all node_modules..."
+          find node_modules -type f -name "build.gradle" -exec sed -i 's/compile /implementation /g' {} +
 
-      - name: 🏗️ Build Android release APK
-        run: |
-          echo "🏗️ Building Android APK..."
+          echo "🛠️ Adding manifest placeholders for Branch + isDebug..."
+          PLACEHOLDERS="MM_BRANCH_KEY_LIVE=live_key_dummy,MM_BRANCH_KEY_TEST=test_key_dummy,isDebug=false"
+          if [ "${{ inputs.metamask_environment }}" = "qa" ]; then
+            PLACEHOLDERS="MM_BRANCH_KEY_LIVE=qa_live_key,MM_BRANCH_KEY_TEST=qa_test_key,isDebug=true"
+          fi
+          grep -q "manifestPlaceholders" android/app/build.gradle || \
+          sed -i "/defaultConfig {/a \
+              \ \ \ \ manifestPlaceholders = [\
+              \ \ \ \ \ \ ${PLACEHOLDERS//,/\\,\\\ }\
+              \ \ \ \ ]" android/app/build.gradle
+
+          echo "🛠️ Fixing Kotlin unresolved references for React Native modules..."
+          find android/app/src/main/java/io -type f -name "*.kt" -exec sed -i \
+            's/ReactApplicationContext/ReactContext/g; s/NativeModule/BaseJavaModule/g; s/Promise/com.facebook.react.bridge.Promise/g' {} +
+
+          echo "🛠️ Cleaning Gradle and Node modules..."
           cd android
-          ./gradlew assembleRelease --no-daemon
-          echo "✅ APK build completed."
+          ./gradlew clean
+          cd ..
 
-      - name: 📤 Upload built APK
+      - name: 🏗️ Build Debug & Release APKs
+        run: |
+          cd android
+          ./gradlew assembleDebug assembleRelease --no-daemon
+          cd ..
+
+      - name: 📤 Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          name: android-apks
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
