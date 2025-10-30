@@ -1,7 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
-    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.20' // ✅ Plugin Compose obligatoire avec Kotlin 2.x
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.20'
 }
 
 def javaVersion = JavaVersion.current()
@@ -19,10 +19,11 @@ android {
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
-        // ✅ Ajout essentiel pour résoudre l’erreur Manifest merger
+        // ✅ Placeholders pour Branch + isDebug
         manifestPlaceholders = [
-            MM_BRANCH_KEY_LIVE: "dummy_live_key", // clé factice (ou ta vraie clé Branch.io)
-            MM_BRANCH_KEY_TEST: "dummy_test_key"  // clé factice (ou ta vraie clé Branch.io)
+            MM_BRANCH_KEY_LIVE: "dummy_live_key",
+            MM_BRANCH_KEY_TEST: "dummy_test_key",
+            isDebug: "false" // valeur par défaut (release)
         ]
     }
 
@@ -31,9 +32,15 @@ android {
             minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+
+            // Placeholder spécifique au release
+            manifestPlaceholders = [isDebug: "false"]
         }
         debug {
             debuggable true
+
+            // Placeholder spécifique au debug
+            manifestPlaceholders = [isDebug: "true"]
         }
     }
 
