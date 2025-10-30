@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.20' // ✅ Ajoute ceci
 }
 
 def javaVersion = JavaVersion.current()
@@ -41,7 +42,6 @@ android {
 
     buildFeatures {
         viewBinding true
-        // Compose activé si besoin
         compose true
     }
 
