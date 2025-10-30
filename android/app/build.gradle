@@ -1,7 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
-    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.20' // ✅ Ajoute ceci
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.20' // ✅ Plugin Compose obligatoire avec Kotlin 2.x
 }
 
 def javaVersion = JavaVersion.current()
@@ -18,6 +18,12 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // ✅ Ajout essentiel pour résoudre l’erreur Manifest merger
+        manifestPlaceholders = [
+            MM_BRANCH_KEY_LIVE: "dummy_live_key", // clé factice (ou ta vraie clé Branch.io)
+            MM_BRANCH_KEY_TEST: "dummy_test_key"  // clé factice (ou ta vraie clé Branch.io)
+        ]
     }
 
     buildTypes {
