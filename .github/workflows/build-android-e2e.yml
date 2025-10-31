@@ -70,112 +70,58 @@ jobs:
 
       - name: 📦 Install JS dependencies
         run: |
-          echo "📦 Installing JS deps..."
           yarn install --frozen-lockfile
 
       - name: 🧠 Super Pre-Build Doctor
         run: |
-          echo "🔍 Running Super Pre-Build Doctor..."
           set -e
-          # 1️⃣ Vérifie ou recrée le Gradle wrapper
-          if [ ! -f "android/gradlew" ]; then
-            echo "⚠️ Gradle wrapper missing — recreating..."
-            cd android && gradle wrapper && cd ..
-          fi
-
-          # 2️⃣ Vérifie le gradle.properties
-          if [ ! -f "android/gradle.properties" ]; then
-            echo "⚙️ Creating android/gradle.properties with sane defaults..."
-            cat <<'EOF' > android/gradle.properties
+          [ ! -f android/gradlew ] && (cd android && gradle wrapper && cd ..)
+          [ ! -f android/gradle.properties ] && cat <<'EOF' > android/gradle.properties
 org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
 android.useAndroidX=true
 android.enableJetifier=true
 EOF
-          fi
-
-          # 3️⃣ Injecte compileSdkVersion si manquant
-          if ! grep -q "compileSdkVersion" android/app/build.gradle; then
-            echo "⚙️ Injecting compileSdkVersion 35..."
-            sed -i "/android {/a \    compileSdkVersion 35" android/app/build.gradle
-          fi
-
-          # 4️⃣ Force version Kotlin stable
-          if grep -q "org.jetbrains.kotlin.android" android/build.gradle 2>/dev/null; then
-            echo "🧩 Forcing Kotlin plugin version to 2.0.20..."
+          grep -q "compileSdkVersion" android/app/build.gradle || sed -i "/android {/a \    compileSdkVersion 35" android/app/build.gradle
+          grep -q "org.jetbrains.kotlin.android" android/build.gradle 2>/dev/null && \
             sed -i -E 's/id\("org.jetbrains.kotlin.android"\).*/id("org.jetbrains.kotlin.android") version "2.0.20"/g' android/build.gradle || true
-          fi
+          grep -q "include ':app'" android/settings.gradle || echo "include ':app'" >> android/settings.gradle
+          [ ! -d node_modules/react-native ] && yarn add react-native
+          echo "✅ Super Pre-Build Doctor done"
 
-          # 5️⃣ Vérifie settings.gradle
-          if ! grep -q "include ':app'" android/settings.gradle; then
-            echo "⚙️ Adding ':app' to settings.gradle..."
-            echo "include ':app'" >> android/settings.gradle
-          fi
-
-          # 6️⃣ Vérifie React Native
-          if [ ! -d "node_modules/react-native" ]; then
-            echo "📦 react-native not found — reinstalling..."
-            yarn add react-native
-          fi
-
-          echo "✅ Super Pre-Build Doctor completed successfully."
-
-      - name: 🛠️ Ultra-AutoMagic: patch modules & config project-wide
+      - name: 🛠️ Ultra-AutoMagic: patch modules & config
         run: |
           set -e
-          echo "🛠️ 1) Replace deprecated 'compile' with 'implementation' (safely)"
-          find node_modules -type f -name "build.gradle" -print0 \
-            | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/\bcompile\b/implementation/g' -i {} || true"
-
-          echo "🛠️ 2) Force compileSdkVersion/targetSdkVersion >= 35 where present"
-          find node_modules -type f -name "build.gradle" -print0 \
-            | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/compileSdkVersion\s+\d+/compileSdkVersion 35/g; s/targetSdkVersion\s+\d+/targetSdkVersion 35/g' -i {} || true"
-
-          echo "🛠️ 3) Force Java compatibility (source/target -> 17)"
-          find node_modules -type f -name "build.gradle" -print0 \
-            | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/sourceCompatibility\s*=.*/sourceCompatibility = JavaVersion.VERSION_17/g; s/targetCompatibility\s*=.*/targetCompatibility = JavaVersion.VERSION_17/g' -i {} || true"
-
-          echo "🛠️ 4) Ensure react.gradle is applied"
-          if ! grep -q "react.gradle" android/build.gradle 2>/dev/null; then
-            echo "apply from: '../node_modules/react-native/react.gradle'" >> android/build.gradle
-          fi
-
-          echo "🛠️ 5) Patch module issues"
-          if [ -f node_modules/react-native-i18n/android/build.gradle ]; then
-            sed -i -E 's/\bcompile\b/implementation/g' node_modules/react-native-i18n/android/build.gradle || true
-            grep -q "com.facebook.react:react-native" node_modules/react-native-i18n/android/build.gradle || \
-              sed -i "/dependencies {/a \\    implementation 'com.facebook.react:react-native:0.72.4'" node_modules/react-native-i18n/android/build.gradle || true
-          fi
-
-          echo "🛠️ 6) Fix Kotlin unresolved references"
-          if [ -d android/app/src/main/java ]; then
-            find android/app/src/main/java -type f -name "*.kt" -print0 \
-              | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/ReactApplicationContext/ReactContext/g; s/NativeModule/BaseJavaModule/g' -i {}" || true
-          fi
-
-          echo "🛠️ 7) Add manifest placeholders"
+          find node_modules -type f -name "build.gradle" -print0 | xargs -0 -n1 -I{} perl -0777 -pe 's/\bcompile\b/implementation/g' -i {}
+          find node_modules -type f -name "build.gradle" -print0 | xargs -0 -n1 -I{} perl -0777 -pe 's/compileSdkVersion\s+\d+/compileSdkVersion 35/g; s/targetSdkVersion\s+\d+/targetSdkVersion 35/g' -i {}
+          find node_modules -type f -name "build.gradle" -print0 | xargs -0 -n1 -I{} perl -0777 -pe 's/sourceCompatibility\s*=.*/sourceCompatibility = JavaVersion.VERSION_17/g; s/targetCompatibility\s*=.*/targetCompatibility = JavaVersion.VERSION_17/g' -i {}
+          grep -q "react.gradle" android/build.gradle || echo "apply from: '../node_modules/react-native/react.gradle'" >> android/build.gradle
+          for pkg in react-native-i18n react-native-payments react-native-aes-crypto react-native-aes-crypto-forked react-native-crypto; do
+            [ -d node_modules/$pkg ] && find node_modules/$pkg -type f -name "build.gradle" -exec sed -i -E 's/\bcompile\b/implementation/g' {} +
+          done
+          [ -d android/app/src/main/java ] && find android/app/src/main/java -type f -name "*.kt" -print0 | xargs -0 -n1 perl -0777 -pe 's/ReactApplicationContext/ReactContext/g; s/NativeModule/BaseJavaModule/g' -i {}
           PLACEHOLDERS="MM_BRANCH_KEY_LIVE=live_key_dummy,MM_BRANCH_KEY_TEST=test_key_dummy,isDebug=false"
-          if [ \"${{ inputs.metamask_environment }}\" = \"qa\" ]; then
-            PLACEHOLDERS=\"MM_BRANCH_KEY_LIVE=qa_live_key,MM_BRANCH_KEY_TEST=qa_test_key,isDebug=true\"
+          if [ "${{ inputs.metamask_environment }}" = "qa" ]; then
+            PLACEHOLDERS="MM_BRANCH_KEY_LIVE=qa_live_key,MM_BRANCH_KEY_TEST=qa_test_key,isDebug=true"
           fi
-          if ! grep -q "manifestPlaceholders" android/app/build.gradle 2>/dev/null; then
-            sed -i \"/defaultConfig {/a \\\
-                \\ \\ \\ \\ manifestPlaceholders = [\\\n\\ \\ \\ \\ \\ \\ ${PLACEHOLDERS//,/\\\\,\\\\\\ }\\\n\\ \\ \\ \\ ]\" android/app/build.gradle || true
-          fi
-
-          echo "🛠️ 8) Ensure gradle.properties has JVM memory"
+          grep -q "manifestPlaceholders" android/app/build.gradle || \
+            sed -i "/defaultConfig {/a \\
+                \\ \\ \\ \\ manifestPlaceholders = [\\\n\\ \\ \\ \\ \\ \\ ${PLACEHOLDERS//,/\\\\,\\\\\\ }\\\n\\ \\ \\ \\ ]" android/app/build.gradle
           grep -q "org.gradle.jvmargs" android/gradle.properties || echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" >> android/gradle.properties
-
-          echo "🛠️ 9) Clean Gradle"
-          cd android
-          ./gradlew clean --no-daemon || true
-          cd ..
+          cd android && ./gradlew clean --no-daemon || true && cd ..
           echo "✅ Ultra-AutoMagic prebuild done"
 
-      - name: 🏗️ Build Debug & Release APKs (safe)
+      - name: 🏗️ Build Debug & Release APKs with Retry
         run: |
           set -e
           cd android
-          ./gradlew assembleDebug assembleRelease --no-daemon || ( echo "Retrying full clean + assemble"; ./gradlew clean && ./gradlew assembleDebug assembleRelease )
+          retry=0
+          until [ $retry -ge 2 ]
+          do
+            ./gradlew assembleDebug assembleRelease --no-daemon && break
+            echo "⚠️ Build failed, retrying after clean..."
+            ./gradlew clean
+            retry=$((retry+1))
+          done
           cd ..
 
       - name: 📤 Upload APKs
