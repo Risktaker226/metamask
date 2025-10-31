@@ -73,6 +73,52 @@ jobs:
           echo "📦 Installing JS deps..."
           yarn install --frozen-lockfile
 
+      - name: 🧠 Super Pre-Build Doctor
+        run: |
+          echo "🔍 Running Super Pre-Build Doctor..."
+          set -e
+          # 1️⃣ Vérifie ou recrée le Gradle wrapper
+          if [ ! -f "android/gradlew" ]; then
+            echo "⚠️ Gradle wrapper missing — recreating..."
+            cd android && gradle wrapper && cd ..
+          fi
+
+          # 2️⃣ Vérifie le gradle.properties
+          if [ ! -f "android/gradle.properties" ]; then
+            echo "⚙️ Creating android/gradle.properties with sane defaults..."
+            cat <<EOF > android/gradle.properties
+org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
+android.useAndroidX=true
+android.enableJetifier=true
+EOF
+          fi
+
+          # 3️⃣ Injecte compileSdkVersion si manquant
+          if ! grep -q "compileSdkVersion" android/app/build.gradle; then
+            echo "⚙️ Injecting compileSdkVersion 35..."
+            sed -i "/android {/a \    compileSdkVersion 35" android/app/build.gradle
+          fi
+
+          # 4️⃣ Force version Kotlin stable
+          if grep -q "org.jetbrains.kotlin.android" android/build.gradle 2>/dev/null; then
+            echo "🧩 Forcing Kotlin plugin version to 2.0.20..."
+            sed -i -E 's/id\\("org.jetbrains.kotlin.android"\\).*/id("org.jetbrains.kotlin.android") version "2.0.20"/g' android/build.gradle || true
+          fi
+
+          # 5️⃣ Vérifie settings.gradle
+          if ! grep -q "include ':app'" android/settings.gradle; then
+            echo "⚙️ Adding ':app' to settings.gradle..."
+            echo "include ':app'" >> android/settings.gradle
+          fi
+
+          # 6️⃣ Vérifie React Native
+          if [ ! -d "node_modules/react-native" ]; then
+            echo "📦 react-native not found — reinstalling..."
+            yarn add react-native
+          fi
+
+          echo "✅ Super Pre-Build Doctor completed successfully."
+
       - name: 🛠️ Ultra-AutoMagic: patch modules & config project-wide
         run: |
           set -e
@@ -88,16 +134,15 @@ jobs:
           find node_modules -type f -name "build.gradle" -print0 \
             | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/sourceCompatibility\\s*=\\s*JavaVersion\\.VERSION_\\d+/sourceCompatibility = JavaVersion.VERSION_17/g; s/targetCompatibility\\s*=\\s*JavaVersion\\.VERSION_\\d+/targetCompatibility = JavaVersion.VERSION_17/g; s/sourceCompatibility\\s+\\\"?\\d+\\\"?/sourceCompatibility = JavaVersion.VERSION_17/g; s/targetCompatibility\\s+\\\"?\\d+\\\"?/targetCompatibility = JavaVersion.VERSION_17/g' -i {} || true"
 
-          echo "🛠️ 4) Ensure react.gradle is applied in android/build.gradle (if RN present)"
+          echo "🛠️ 4) Ensure react.gradle is applied in android/build.gradle"
           if grep -q "node_modules/react-native/react.gradle" android/build.gradle 2>/dev/null; then
             echo " - react.gradle already referenced"
           else
             echo "apply from: '../node_modules/react-native/react.gradle'" >> android/build.gradle
-            echo " - appended react.gradle include to android/build.gradle"
+            echo " - appended react.gradle include"
           fi
 
-          echo "🛠️ 5) Auto-fix known module-specific problems (i18n, payments, aes, etc.)"
-          # react-native-i18n: replace compile() and add implementation react-native if missing
+          echo "🛠️ 5) Auto-fix known module-specific problems"
           if [ -f node_modules/react-native-i18n/android/build.gradle ]; then
             sed -i -E 's/\\bcompile\\b/implementation/g' node_modules/react-native-i18n/android/build.gradle || true
             grep -q "com.facebook.react:react-native" node_modules/react-native-i18n/android/build.gradle || \
@@ -105,13 +150,11 @@ jobs:
             echo " - patched react-native-i18n"
           fi
 
-          # react-native-payments: force SDK >=30 in its gradle if exists
           if [ -f node_modules/react-native-payments/android/build.gradle ]; then
             sed -i -E 's/compileSdkVersion\\s+[0-9]+/compileSdkVersion 35/g' node_modules/react-native-payments/android/build.gradle || true
             echo " - patched react-native-payments"
           fi
 
-          # generic sed safety for other known problematic packages (aes, crypto forks, etc.)
           for pkg in react-native-aes-crypto react-native-aes-crypto-forked react-native-crypto; do
             if [ -d "node_modules/$pkg" ]; then
               find node_modules/$pkg -type f -name "build.gradle" -exec sed -i -E 's/\\bcompile\\b/implementation/g' {} + || true
@@ -119,13 +162,13 @@ jobs:
             fi
           done
 
-          echo "🛠️ 6) Fix Kotlin unresolved references for RN native modules under android/app/src"
+          echo "🛠️ 6) Fix Kotlin unresolved references in android/app/src"
           if [ -d android/app/src/main/java ]; then
             find android/app/src/main/java -type f -name "*.kt" -print0 \
               | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/ReactApplicationContext/ReactContext/g; s/NativeModule/BaseJavaModule/g; s/import com.facebook.react.bridge.NativeModule;/import com.facebook.react.bridge.BaseJavaModule;/' -i {}" || true
           fi
 
-          echo "🛠️ 7) Add manifest placeholders (Branch + isDebug) if missing"
+          echo "🛠️ 7) Add manifest placeholders"
           PLACEHOLDERS="MM_BRANCH_KEY_LIVE=live_key_dummy,MM_BRANCH_KEY_TEST=test_key_dummy,isDebug=false"
           if [ \"${{ inputs.metamask_environment }}\" = \"qa\" ]; then
             PLACEHOLDERS=\"MM_BRANCH_KEY_LIVE=qa_live_key,MM_BRANCH_KEY_TEST=qa_test_key,isDebug=true\"
@@ -138,7 +181,7 @@ jobs:
             echo " - manifestPlaceholders already present"
           fi
 
-          echo "🛠️ 8) Sanity: ensure android/gradle.properties has enough JVM memory"
+          echo "🛠️ 8) Ensure gradle.properties has JVM memory"
           if ! grep -q "org.gradle.jvmargs" android/gradle.properties 2>/dev/null; then
             echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" >> android/gradle.properties
             echo " - added org.gradle.jvmargs"
@@ -154,7 +197,6 @@ jobs:
         run: |
           set -e
           cd android
-          # Try incremental assemble, fallback to full assemble on failure
           ./gradlew assembleDebug assembleRelease --no-daemon || ( echo "Retrying full clean + assemble"; ./gradlew clean && ./gradlew assembleDebug assembleRelease )
           cd ..
 
