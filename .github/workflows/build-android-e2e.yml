@@ -34,6 +34,7 @@ jobs:
 
       - name: ⚙️ Install Android SDK Commandline Tools
         run: |
+          set -e
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           cd "$ANDROID_SDK_ROOT/cmdline-tools"
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O sdk-tools.zip
@@ -43,7 +44,7 @@ jobs:
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
           yes | sdkmanager --licenses || true
           sdkmanager --update || true
-          sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+          sdkmanager "platform-tools" "build-tools;35.0.0" "platforms;android-35"
           echo "✅ Android SDK ready"
 
       - name: 🔑 Generate temporary keystore
@@ -76,14 +77,14 @@ jobs:
         run: |
           set -e
           [ ! -f android/gradlew ] && (cd android && gradle wrapper && cd ..)
-          [ ! -f android/gradle.properties ] && cat <<'EOF' > android/gradle.properties
-org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
-android.useAndroidX=true
-android.enableJetifier=true
-EOF
+          if [ ! -f android/gradle.properties ]; then
+            echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" > android/gradle.properties
+            echo "android.useAndroidX=true" >> android/gradle.properties
+            echo "android.enableJetifier=true" >> android/gradle.properties
+          fi
           grep -q "compileSdkVersion" android/app/build.gradle || sed -i "/android {/a \    compileSdkVersion 35" android/app/build.gradle
           grep -q "org.jetbrains.kotlin.android" android/build.gradle 2>/dev/null && \
-            sed -i -E 's/id\("org.jetbrains.kotlin.android"\).*/id("org.jetbrains.kotlin.android") version "2.0.20"/g' android/build.gradle || true
+            sed -i -E 's/id\(\"org.jetbrains.kotlin.android\"\).*/id(\"org.jetbrains.kotlin.android\") version \"2.0.20\"/g' android/build.gradle || true
           grep -q "include ':app'" android/settings.gradle || echo "include ':app'" >> android/settings.gradle
           [ ! -d node_modules/react-native ] && yarn add react-native
           echo "✅ Super Pre-Build Doctor done"
