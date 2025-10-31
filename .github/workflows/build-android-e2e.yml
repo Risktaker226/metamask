@@ -1,4 +1,4 @@
-name: Build Android E2E APKs (Ultra-AutoMagic)
+name: Build Android E2E APKs (Ultra-Extreme)
 
 on:
   workflow_call:
@@ -16,11 +16,8 @@ on:
 
 jobs:
   build-android-apks:
-    name: Ultra-AutoMagic Android APK Build
+    name: Ultra-Extreme Android APK Build
     runs-on: ubuntu-22.04
-    env:
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      JAVA_HOME: /usr/lib/jvm/adoptopenjdk-17-hotspot
 
     steps:
       - name: 🧭 Checkout repository
@@ -32,8 +29,9 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: ⚙️ Install Android SDK Commandline Tools
+      - name: ⚙️ Install Android SDK
         run: |
+          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           cd "$ANDROID_SDK_ROOT/cmdline-tools"
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O sdk-tools.zip
@@ -44,7 +42,6 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager --update || true
           sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
-          echo "✅ Android SDK ready"
 
       - name: 🔑 Generate temporary keystore
         run: |
@@ -52,12 +49,10 @@ jobs:
           rm -f android/app/debug.keystore || true
           keytool -genkeypair -v \
             -keystore android/app/debug.keystore \
-            -storepass android \
-            -keypass android \
+            -storepass android -keypass android \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -alias androiddebugkey \
             -dname "CN=Android Debug,O=Android,C=US"
-          echo "✅ Keystore generated"
 
       - name: 📦 Cache Gradle & Node Modules
         uses: actions/cache@v4
@@ -69,93 +64,47 @@ jobs:
           key: gradle-node-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/yarn.lock') }}
 
       - name: 📦 Install JS dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: 🛠️ Patch all modules & fix native errors
         run: |
-          echo "📦 Installing JS deps..."
-          yarn install --frozen-lockfile
+          echo "🛠️ Patching all deprecated Gradle compile() calls..."
+          find node_modules -type f -name "build.gradle" -exec sed -i 's/compile /implementation /g' {} +
 
-      - name: 🛠️ Ultra-AutoMagic: patch modules & config project-wide
-        run: |
-          set -e
-          echo "🛠️ 1) Replace deprecated 'compile' with 'implementation' (safely)"
-          find node_modules -type f -name "build.gradle" -print0 \
-            | xargs -0 -n1 -I{} sh -c "perl -0777 -pe \"s/\\bcompile\\b/implementation/g\" -i {} || true"
+          echo "🛠️ Forcing compileSdkVersion >= 35 / targetSdkVersion >= 35..."
+          find node_modules -type f -name "build.gradle" -exec sed -i \
+            -e 's/compileSdkVersion [0-9]\+/compileSdkVersion 35/g' \
+            -e 's/targetSdkVersion [0-9]\+/targetSdkVersion 35/g' {} +
 
-          echo "🛠️ 2) Force compileSdkVersion/targetSdkVersion >= 35 where present"
-          find node_modules -type f -name "build.gradle" -print0 \
-            | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/compileSdkVersion\\s+\\d+/compileSdkVersion 35/g; s/targetSdkVersion\\s+\\d+/targetSdkVersion 35/g' -i {} || true"
+          echo "🛠️ Forcing Java 17 compatibility..."
+          find node_modules -type f -name "build.gradle" -exec sed -i \
+            -e '/sourceCompatibility/s/=.*/= JavaVersion.VERSION_17/' \
+            -e '/targetCompatibility/s/=.*/= JavaVersion.VERSION_17/' {} +
 
-          echo "🛠️ 3) Force Java compatibility (source/target -> 17) in gradle files"
-          find node_modules -type f -name "build.gradle" -print0 \
-            | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/sourceCompatibility\\s*=\\s*JavaVersion\\.VERSION_\\d+/sourceCompatibility = JavaVersion.VERSION_17/g; s/targetCompatibility\\s*=\\s*JavaVersion\\.VERSION_\\d+/targetCompatibility = JavaVersion.VERSION_17/g; s/sourceCompatibility\\s+\\\"?\\d+\\\"?/sourceCompatibility = JavaVersion.VERSION_17/g; s/targetCompatibility\\s+\\\"?\\d+\\\"?/targetCompatibility = JavaVersion.VERSION_17/g' -i {} || true"
+          echo "🛠️ Fixing Kotlin unresolved references for React Native modules..."
+          find android/app/src/main/java/io -type f -name "*.kt" -exec sed -i \
+            's/ReactApplicationContext/ReactContext/g; s/NativeModule/BaseJavaModule/g; s/Promise/com.facebook.react.bridge.Promise/g' {} +
 
-          echo "🛠️ 4) Ensure react.gradle is applied in android/build.gradle (if RN present)"
-          if grep -q "node_modules/react-native/react.gradle" android/build.gradle 2>/dev/null; then
-            echo " - react.gradle already referenced"
-          else
-            echo "apply from: '../node_modules/react-native/react.gradle'" >> android/build.gradle
-            echo " - appended react.gradle include to android/build.gradle"
-          fi
-
-          echo "🛠️ 5) Auto-fix known module-specific problems (i18n, payments, aes, etc.)"
-          # react-native-i18n: replace compile() and add implementation react-native if missing
-          if [ -f node_modules/react-native-i18n/android/build.gradle ]; then
-            sed -i -E 's/\\bcompile\\b/implementation/g' node_modules/react-native-i18n/android/build.gradle || true
-            grep -q "com.facebook.react:react-native" node_modules/react-native-i18n/android/build.gradle || \
-              sed -i "/dependencies {/a \\    implementation 'com.facebook.react:react-native:0.72.4'" node_modules/react-native-i18n/android/build.gradle || true
-            echo " - patched react-native-i18n"
-          fi
-
-          # react-native-payments: force SDK >=30 in its gradle if exists
-          if [ -f node_modules/react-native-payments/android/build.gradle ]; then
-            sed -i -E 's/compileSdkVersion\\s+[0-9]+/compileSdkVersion 35/g' node_modules/react-native-payments/android/build.gradle || true
-            echo " - patched react-native-payments"
-          fi
-
-          # generic sed safety for other known problematic packages (aes, crypto forks, etc.)
-          for pkg in react-native-aes-crypto react-native-aes-crypto-forked react-native-crypto; do
-            if [ -d "node_modules/$pkg" ]; then
-              find node_modules/$pkg -type f -name "build.gradle" -exec sed -i -E 's/\\bcompile\\b/implementation/g' {} + || true
-              echo " - patched $pkg"
-            fi
-          done
-
-          echo "🛠️ 6) Fix Kotlin unresolved references for RN native modules under android/app/src"
-          if [ -d android/app/src/main/java ]; then
-            find android/app/src/main/java -type f -name "*.kt" -print0 \
-              | xargs -0 -n1 -I{} sh -c "perl -0777 -pe 's/ReactApplicationContext/ReactContext/g; s/NativeModule/BaseJavaModule/g; s/import com.facebook.react.bridge.NativeModule;/import com.facebook.react.bridge.BaseJavaModule;/' -i {}" || true
-          fi
-
-          echo "🛠️ 7) Add manifest placeholders (Branch + isDebug) if missing"
+          echo "🛠️ Adding manifest placeholders if missing..."
           PLACEHOLDERS="MM_BRANCH_KEY_LIVE=live_key_dummy,MM_BRANCH_KEY_TEST=test_key_dummy,isDebug=false"
-          if [ \"${{ inputs.metamask_environment }}\" = \"qa\" ]; then
-            PLACEHOLDERS=\"MM_BRANCH_KEY_LIVE=qa_live_key,MM_BRANCH_KEY_TEST=qa_test_key,isDebug=true\"
+          if [ "${{ inputs.metamask_environment }}" = "qa" ]; then
+            PLACEHOLDERS="MM_BRANCH_KEY_LIVE=qa_live_key,MM_BRANCH_KEY_TEST=qa_test_key,isDebug=true"
           fi
-          if ! grep -q "manifestPlaceholders" android/app/build.gradle 2>/dev/null; then
-            sed -i \"/defaultConfig {/a \\\
-                \\ \\ \\ \\ manifestPlaceholders = [\\\n\\ \\ \\ \\ \\ \\ ${PLACEHOLDERS//,/\\\\,\\\\\\ }\\\n\\ \\ \\ \\ ]\" android/app/build.gradle || true
-            echo " - manifestPlaceholders inserted"
-          else
-            echo " - manifestPlaceholders already present"
-          fi
+          grep -q "manifestPlaceholders" android/app/build.gradle || \
+          sed -i "/defaultConfig {/a \
+              \ \ \ \ manifestPlaceholders = [\
+              \ \ \ \ \ \ ${PLACEHOLDERS//,/\\,\\\ }\
+              \ \ \ \ ]" android/app/build.gradle
 
-          echo "🛠️ 8) Sanity: ensure android/gradle.properties has enough JVM memory"
-          if ! grep -q "org.gradle.jvmargs" android/gradle.properties 2>/dev/null; then
-            echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" >> android/gradle.properties
-            echo " - added org.gradle.jvmargs"
-          fi
-
-          echo "🛠️ 9) Final clean before build"
+          echo "🛠️ Cleaning Gradle & Node modules..."
           cd android
-          ./gradlew clean --no-daemon || true
+          ./gradlew clean
           cd ..
-          echo "✅ Ultra-AutoMagic prebuild done"
 
-      - name: 🏗️ Build Debug & Release APKs (safe)
+      - name: 🏗️ Build Debug & Release APKs
         run: |
-          set -e
           cd android
-          # Try incremental assemble, fallback to full assemble on failure
-          ./gradlew assembleDebug assembleRelease --no-daemon || ( echo "Retrying full clean + assemble"; ./gradlew clean && ./gradlew assembleDebug assembleRelease )
+          ./gradlew assembleDebug assembleRelease --no-daemon
           cd ..
 
       - name: 📤 Upload APKs
