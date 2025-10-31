@@ -19,22 +19,27 @@ buildscript {
 	}
 
 	dependencies {
-		classpath("com.android.tools.build:gradle")
-    	classpath("com.facebook.react:react-native-gradle-plugin")
-		classpath("io.sentry:sentry-android-gradle-plugin:4.2.0")
-    	classpath("com.google.gms:google-services:4.4.2")
-	    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+		// Plugin Android Gradle mis à jour
+		classpath("com.android.tools.build:gradle:8.2.1")
+		// Plugin React Native Gradle mis à jour selon la version RN récente
+    	classpath("com.facebook.react:react-native-gradle-plugin:0.72.0")
+		// Plugin Sentry Android mis à jour
+		classpath("io.sentry:sentry-android-gradle-plugin:4.11.0")
+    	// Plugin Google Services mis à jour
+		classpath("com.google.gms:google-services:4.4.3")
+	    // Plugin Kotlin Gradle avec version correspondant à kotlin_version
+	    classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25")
 	}
 	allprojects {
-    repositories {
-        maven {
-          url("$rootDir/../node_modules/detox/Detox-android")
-        }
-		        // Notifee repository
-        maven {
-            url(new File(['node', '--print', "require.resolve('@notifee/react-native/package.json')"].execute(null, rootDir).text.trim(), '../android/libs'))
-        }
-        maven { url "https://jitpack.io" }
-    }
+    	repositories {
+        	maven {
+          		url("$rootDir/../node_modules/detox/Detox-android")
+        	}
+        	// Notifee repository
+        	maven {
+            	url(new File(['node', '--print', "require.resolve('@notifee/react-native/package.json')"].execute(null, rootDir).text.trim(), '../android/libs'))
+        	}
+        	maven { url "https://jitpack.io" }
+    	}
 	}
 }
