@@ -20,6 +20,24 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: 🧹 Préparation & grand nettoyage intelligent
+        run: |
+          echo "🧹 Vérification de l’espace disque avant nettoyage..."
+          df -h
+          echo "🧹 Suppression des caches Gradle et Node trop lourds..."
+          rm -rf ~/.gradle/caches/build-cache-* || true
+          rm -rf ~/.gradle/daemon || true
+          rm -rf ~/.gradle/native || true
+          rm -rf ~/.npm || true
+          rm -rf ~/.yarn-cache || true
+          rm -rf /tmp/* || true
+          echo "🧹 Nettoyage des runners GitHub (cache docker, journaux, etc.)..."
+          sudo rm -rf /usr/local/lib/android/sdk/.android || true
+          sudo rm -rf /opt/hostedtoolcache/* || true
+          echo "✅ Espace disque après nettoyage :"
+          df -h
+          echo "✨ Grand nettoyage terminé, prêt à builder comme un samouraï."
+
       - name: 🧭 Checkout repository
         uses: actions/checkout@v4
 
