@@ -101,10 +101,35 @@ jobs:
           ./gradlew clean
           cd ..
 
+      - name: 🛠️ Patch deprecated Gradle features in node_modules
+        run: |
+          echo "🛠️ Applying Gradle 9 ready patch..."
+          find node_modules -type f -name "build.gradle" -exec sed -i 's/^\s*compile /implementation /g' {} +
+          find node_modules -type f -name "build.gradle" -exec sed -i \
+            -e '/sourceCompatibility/s/=.*/= JavaVersion.VERSION_17/' \
+            -e '/targetCompatibility/s/=.*/= JavaVersion.VERSION_17/' {} +
+          find node_modules -type f -name "build.gradle" -exec sed -i \
+            -e 's/compileSdkVersion [0-9]\+/compileSdkVersion 35/g' \
+            -e 's/targetSdkVersion [0-9]\+/targetSdkVersion 35/g' {} +
+          echo "🛠️ Node modules patched successfully."
+
+      - name: 🛠️ Proguard, Detox & Hermes Gradle 9 fixes
+        run: |
+          echo "🛠️ Applying Proguard & Hermes fixes for Gradle 9..."
+          # Detox
+          grep -q "# Detox Gradle 9 fix" android/app/proguard-rules.pro || \
+          echo -e "\n# Detox Gradle 9 fix\n-keep class com.wix.** { *; }\n-dontwarn com.wix.**" >> android/app/proguard-rules.pro
+          # Sentry
+          grep -q "# Sentry Gradle 9 fix" android/app/proguard-rules.pro || \
+          echo -e "\n# Sentry Gradle 9 fix\n-keep class io.sentry.** { *; }\n-dontwarn io.sentry.**" >> android/app/proguard-rules.pro
+          # Hermes Java 17
+          find android/app/src/main/java -type f -name "*.java" -exec sed -i 's/JavaVersion.VERSION_1.8/JavaVersion.VERSION_17/g' {} +
+          echo "🛠️ Proguard, Detox, Sentry and Hermes ready for Gradle 9."
+
       - name: 🏗️ Build Release APK only
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon --parallel --configure-on-demand --build-cache
           cd ..
 
       - name: 📤 Upload Release APK only
